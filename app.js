@@ -724,7 +724,7 @@
     h += '<hr style="border:none;border-top:1px solid var(--border);margin:18px 0"><b class="small">Data</b>';
     h += '<div class="actions"><button class="btn ghost" onclick="App.exportData()">Export backup</button><button class="btn ghost" onclick="App.importData()">Import</button><button class="btn danger" onclick="App.resetData()">Reset all</button></div>';
     h += '<input type="file" id="impFile" class="hidden" accept=".json" onchange="App.doImport(this.files[0])">';
-    h += '<div class="muted small" style="margin-top:14px;text-align:center">StudyBuddy · works offline · your data never leaves this device.</div>';
+    h += '<div class="muted small" style="margin-top:14px;text-align:center">StudyBuddy · works offline · your data never leaves this device.<br><a href="privacy.html" target="_blank" rel="noopener">Privacy policy</a></div>';
     modal("Settings", h);
   }
 
