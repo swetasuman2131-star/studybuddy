@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://swetasuman2131-star.github.io/studybuddy/sitemap.xml
