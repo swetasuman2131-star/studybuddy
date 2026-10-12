@@ -6,10 +6,11 @@
   const KEY = "studybuddy.v1";
   const DEFAULT = {
     profile: { name: "", klass: "", streak: 0, lastStudyDay: null, created: null },
-    tasks: [], events: [], subjects: [], notes: [], sessions: [], chat: [],
+    tasks: [], events: [], subjects: [], notes: [], sessions: [], chat: [], cards: [],
     settings: {
       theme: "light", work: 25, short: 5, long: 15, rounds: 4,
-      provider: "sarvam", model: "sarvam-105b", apiKey: "", useNotesContext: true, autostartBreak: true
+      provider: "sarvam", model: "sarvam-105b", apiKey: "", useNotesContext: true, autostartBreak: true,
+      sound: true, lang: "English"
     }
   };
   let S = load();
@@ -73,6 +74,8 @@
   function subjectById(id) { return S.subjects.find((s) => s.id === id); }
   function subjectName(id) { const s = subjectById(id); return s ? s.name : "General"; }
   function subjectColor(id) { const s = subjectById(id); return s ? s.color : "#8a8fb0"; }
+  const LANGS = ["English", "Hindi", "Tamil", "Telugu", "Bengali", "Marathi", "Gujarati", "Kannada", "Malayalam", "Punjabi", "Odia", "Urdu"];
+  function langOptions(sel) { return LANGS.map((l) => '<option' + (l === sel ? " selected" : "") + ">" + l + "</option>").join(""); }
 
   /* ---------------- modal ---------------- */
   function modal(title, html, onMount) {
@@ -134,6 +137,7 @@
     h += qa("doubts", "🤖", "Ask a doubt");
     h += qa("calendar", "📅", "Calendar");
     h += qa("calc", "🧮", "Calculator");
+    h += qa("cards", "🃏", "Flashcards");
     h += "</div>";
 
     h += '<div class="section-title"><h2>Today\'s tasks</h2><button class="btn sm ghost" onclick="App.go(\'tasks\')">All</button></div>';
@@ -143,6 +147,13 @@
     h += '<div class="section-title"><h2>Coming up</h2><button class="btn sm ghost" onclick="App.go(\'calendar\')">Calendar</button></div>';
     if (!upcoming.length) h += emptyBox("📅", "No exams or deadlines added yet.");
     else h += '<div class="list">' + upcoming.map(eventRow).join("") + "</div>";
+
+    const exams = S.events.filter((e) => e.type === "Exam" && e.date >= t).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 4);
+    if (exams.length) {
+      h += '<div class="section-title"><h2>Exam countdown</h2><button class="btn sm ghost" onclick="App.go(\'calendar\')">Calendar</button></div><div class="grid g2">';
+      h += exams.map(examTile).join("");
+      h += "</div>";
+    }
 
     if (syl.subjects.length) {
       h += '<div class="section-title"><h2>Syllabus progress</h2><button class="btn sm ghost" onclick="App.go(\'syllabus\')">Open</button></div><div class="card">';
@@ -160,6 +171,15 @@
   function emptyBox(i, t) { return '<div class="empty"><span class="big">' + i + "</span>" + t + "</div>"; }
   function progressLine(name, pct, color) {
     return '<div style="margin-bottom:11px"><div class="row" style="justify-content:space-between;margin-bottom:5px"><span style="font-weight:650;font-size:13.5px">' + escapeHtml(name) + '</span><span class="muted small">' + pct + '%</span></div><div class="bar"><span style="width:' + pct + "%;background:" + color + '"></span></div></div>';
+  }
+  function examTile(e) {
+    const d = daysBetween(todayISO(), e.date);
+    const tone = d <= 1 ? "var(--bad)" : d <= 7 ? "var(--warn)" : "var(--primary)";
+    const num = d === 0 ? "Today!" : d;
+    return '<div class="stat" style="border-left:4px solid ' + tone + '"><div class="n" style="color:' + tone + '">' + num + '</div>' +
+      '<div class="l">' + (d === 0 ? "exam day" : d === 1 ? "day to go" : "days to go") + '</div>' +
+      '<div style="font-weight:650;font-size:13px;margin-top:6px">' + escapeHtml(e.title) + '</div>' +
+      '<div class="muted small">' + relDay(e.date) + (e.subject ? " · " + escapeHtml(subjectName(e.subject)) : "") + '</div></div>';
   }
 
   /* ================= TASKS ================= */
@@ -340,6 +360,7 @@
     S.profile.lastStudyDay = t;
   }
   function beep() {
+    if (!S.settings.sound) return;
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       [0, 0.18, 0.36].forEach((d) => {
@@ -357,7 +378,7 @@
   /* ================= NOTES ================= */
   let noteSearch = "";
   VIEWS.notes = function () {
-    let h = '<div class="section-title"><h2>Notes</h2><button class="btn sm primary" onclick="App.newNote()">+ New</button></div>';
+    let h = '<div class="section-title"><h2>Notes</h2><div class="row"><button class="btn sm ghost" onclick="App.go(\'cards\')">🃏 Cards</button><button class="btn sm primary" onclick="App.newNote()">+ New</button></div></div>';
     h += '<div class="card"><div class="upload-drop" onclick="App.pickChapter()"><div style="font-size:26px">📄</div><b>Upload a chapter</b><div class="small">PDF, Word (.docx), text/markdown or a photo of a page — StudyBuddy turns it into notes.</div></div>';
     h += '<input type="file" id="chapFile" class="hidden" accept=".txt,.md,.markdown,.csv,.docx,.pdf,image/*" onchange="App.handleChapter(this.files[0]);this.value=\'\'"></div>';
     h += '<div class="card"><input id="noteSearch" placeholder="Search notes…" value="' + escapeHtml(noteSearch) + '" oninput="App.searchNotes(this.value)"></div>';
@@ -460,18 +481,69 @@
       "Keep language simple. Chapter title: " + title + "\n\n---\n" + text.slice(0, 12000);
   }
 
+  /* ================= FLASHCARDS ================= */
+  VIEWS.cards = function () {
+    let h = '<div class="section-title"><h2>Flashcards</h2><button class="btn sm ghost" onclick="App.newCard()">+ Card</button></div>';
+    h += '<div class="card"><div class="row" style="justify-content:space-between"><div><b>' + S.cards.length + ' card' + (S.cards.length === 1 ? "" : "s") + '</b><div class="muted small">Make cards from a note, or add your own.</div></div>';
+    if (S.cards.length) h += '<button class="btn primary sm" onclick="App.studyCards()">Study all</button>';
+    h += "</div></div>";
+    if (!S.cards.length) { h += emptyBox("🃏", "No flashcards yet. Open a note and tap “Make flashcards”."); return h; }
+    const groups = {};
+    S.cards.forEach((c) => { const k = c.subject || "_"; (groups[k] = groups[k] || []).push(c); });
+    Object.keys(groups).forEach((k) => {
+      h += '<div class="section-title"><h2>' + (k === "_" ? "General" : escapeHtml(subjectName(k))) + '</h2><span class="muted small">' + groups[k].length + '</span></div>';
+      h += '<div class="list">' + groups[k].map(cardRow).join("") + "</div>";
+    });
+    return h;
+  };
+  function cardRow(c) {
+    return '<div class="item"><div class="grow"><div class="t">' + escapeHtml(c.front) + '</div><div class="muted small">' + escapeHtml(c.back) + '</div></div><button class="iconbtn" style="width:32px;height:32px;font-size:14px" onclick="App.delCard(\'' + c.id + '\')">🗑</button></div>';
+  }
+  function offlineCards(text) {
+    const out = [], seen = {};
+    const add = (f, b) => { f = (f || "").trim(); b = (b || "").trim(); if (f.length < 3 || b.length < 2) return; const k = f.toLowerCase(); if (seen[k]) return; seen[k] = 1; out.push({ front: f, back: b }); };
+    const terms = text.match(/##\s*Important terms([\s\S]*?)(\n##|$)/i);
+    if (terms) terms[1].split("\n").forEach((l) => { const m = l.match(/^[\s\-*]*\*\*(.+?)\*\*\s*:?\s*(.+)$/); if (m) add(m[1], m[2]); });
+    sentences(text).forEach((s) => { const m = s.match(/^(.{3,60}?)\s+(?:is|are|means|refers to|is defined as|is called)\s+(.{8,})$/i); if (m) add("What is " + m[1].trim() + "?", m[2].trim()); });
+    return out.slice(0, 25);
+  }
+  function parseAICards(txt) {
+    const out = []; let q = null;
+    txt.split("\n").forEach((l) => {
+      const mq = l.match(/^\s*(?:Q(?:uestion)?\s*\d*\s*[:.)]|[-*]\s*Q\s*[:.)])\s*(.+)$/i);
+      const ma = l.match(/^\s*(?:A(?:nswer)?\s*\d*\s*[:.)]|[-*]\s*A\s*[:.)])\s*(.+)$/i);
+      if (mq) q = mq[1].trim();
+      else if (ma && q) { out.push({ front: q, back: ma[1].trim() }); q = null; }
+    });
+    return out;
+  }
+  let study = null;
+  function openStudy() {
+    if (!study) return;
+    const c = study.deck[study.i];
+    let h = '<div class="muted small" style="margin-bottom:10px">Card ' + (study.i + 1) + " of " + study.deck.length + " · " + study.known.size + " known</div>";
+    h += '<div class="card tap" style="min-height:150px;display:grid;place-items:center;text-align:center;font-size:18px;font-weight:650;padding:26px" onclick="App.flip()">' + escapeHtml(study.flipped ? c.back : c.front) + "</div>";
+    h += '<div class="muted small" style="text-align:center;margin-bottom:10px">' + (study.flipped ? "Tap the card to see the question again" : "Tap the card to reveal the answer") + "</div>";
+    h += '<div class="actions">';
+    if (study.flipped) h += '<button class="btn ghost" onclick="App.again()">Again</button><button class="btn primary" onclick="App.gotIt()">Got it</button>';
+    else h += '<button class="btn ghost" onclick="App.studyNext()">Skip</button>';
+    h += "</div>";
+    modal("Flashcards", h);
+  }
+
   /* ================= DOUBTS (AI bot) ================= */
   VIEWS.doubts = function () {
     const configured = !!(S.settings.apiKey && S.settings.provider !== "offline");
     let h = '<div class="section-title"><h2>Doubts bot</h2><button class="btn sm ghost" onclick="App.settings()">' + (configured ? "⚙️ " + S.settings.provider : "⚙️ Set up AI") + "</button></div>";
     if (!configured) {
-      h += '<div class="card"><b>Offline mode</b><div class="muted small">I can search your own notes and give study tips. Add a Sarvam or OpenAI API key in Settings to ask any question and get a real tutor answer. Your key stays on this device.</div></div>';
+      h += '<div class="card"><b>Offline mode</b><div class="muted small">I can search your own notes and give study tips. Add a Sarvam or OpenAI API key in Settings to ask any question, get a real tutor answer, and have it reply in your chosen language. Your key stays on this device.</div></div>';
     }
+    h += '<div class="field" style="margin-bottom:12px"><label>Answer language</label><select onchange="App.setLang(this.value)">' + langOptions(S.settings.lang) + '</select></div>';
     h += '<div class="card"><div class="chat" id="chat">';
     if (!S.chat.length) h += '<div class="msg bot">Hi! I\'m your study buddy. Ask me any doubt — maths, science, history, anything. ' + (configured ? "" : "(Offline for now — add a key for full answers.)") + "</div>";
     else h += S.chat.map((m) => '<div class="msg ' + (m.role === "user" ? "user" : "bot") + '">' + renderMd(m.content) + "</div>").join("");
     h += '</div><div class="chat-input"><textarea id="doubtInput" placeholder="Type your doubt…" onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();App.sendDoubt()}"></textarea><button class="btn primary" id="sendBtn" onclick="App.sendDoubt()">➤</button></div>';
-    h += '<div class="row" style="margin-top:8px;justify-content:space-between"><button class="btn sm ghost" onclick="App.clearChat()">Clear chat</button><span class="muted small" id="aiStatus">' + (configured ? "Using " + S.settings.provider + " · " + S.settings.model : "Offline (notes search)") + "</span></div></div>";
+    h += '<div class="row" style="margin-top:8px;justify-content:space-between"><button class="btn sm ghost" onclick="App.clearChat()">Clear chat</button><span class="muted small" id="aiStatus">' + (configured ? "Using " + S.settings.provider + " · " + S.settings.model : "Offline (notes search)") + " · " + S.settings.lang + "</span></div></div>";
     return h;
   };
   VIEWS.doubts_mount = function () { const c = $("#chat"); if (c) c.scrollTop = c.scrollHeight; };
@@ -639,9 +711,11 @@
     let h = '<div class="field"><label>Your name</label><input id="stName" value="' + escapeHtml(S.profile.name) + '" placeholder="e.g. Aarav"></div>';
     h += '<div class="field"><label>Class / standard</label><input id="stClass" value="' + escapeHtml(S.profile.klass) + '" placeholder="e.g. Class 9"></div>';
     h += '<div class="field"><label>Theme</label><select id="stTheme"><option value="light"' + (s.theme === "light" ? " selected" : "") + '>Light</option><option value="dark"' + (s.theme === "dark" ? " selected" : "") + ">Dark</option></select></div>";
+    h += '<label class="row small" style="gap:8px;margin-bottom:6px"><input type="checkbox" id="stSound" style="width:auto"' + (s.sound ? " checked" : "") + "> Play a sound when the timer finishes</label>";
     h += '<hr style="border:none;border-top:1px solid var(--border);margin:16px 0">';
     h += '<b class="small">Doubts bot</b>';
     h += '<div class="field" style="margin-top:8px"><label>Provider</label><select id="stProv" onchange="App.stProvChange(this.value)"><option value="sarvam"' + (s.provider === "sarvam" ? " selected" : "") + '>Sarvam AI (recommended)</option><option value="openai"' + (s.provider === "openai" ? " selected" : "") + '>OpenAI</option><option value="offline"' + (s.provider === "offline" ? " selected" : "") + ">Offline (notes only)</option></select></div>";
+    h += '<div class="field"><label>Answer language</label><select id="stLang">' + langOptions(s.lang) + '</select></div>';
     h += '<div class="field"><label>API key <span class="muted">(stored only on this device)</span></label><input id="stKey" type="password" value="' + escapeHtml(s.apiKey) + '" placeholder="paste your key"></div>';
     h += '<div class="field"><label>Model</label><input id="stModel" value="' + escapeHtml(s.model) + '"></div>';
     h += '<label class="row small" style="gap:8px;margin-bottom:6px"><input type="checkbox" id="stCtx" style="width:auto"' + (s.useNotesContext ? " checked" : "") + "> Let the bot use my notes as context</label>";
@@ -743,7 +817,7 @@
       const n = S.notes.find((x) => x.id === id); if (!n) return;
       let h = '<div class="muted small" style="margin-bottom:10px">' + (n.subject ? escapeHtml(subjectName(n.subject)) + " · " : "") + new Date(n.created).toLocaleDateString("en-IN") + (n.source === "ai" ? " · AI-generated" : n.source === "offline" ? " · auto-generated" : "") + "</div>";
       h += '<div class="note-body">' + renderNoteBody(n.content) + "</div>";
-      h += '<div class="actions"><button class="btn primary" onclick="App.closeModal()">Done</button></div>';
+      h += '<div class="actions"><button class="btn ghost" onclick="App.cardsFromNote(\'' + n.id + '\')">🃏 Make flashcards</button><button class="btn primary" onclick="App.closeModal()">Done</button></div>';
       modal(n.title, h);
     },
     delNote: function (id) { S.notes = S.notes.filter((n) => n.id !== id); save(); go("notes"); },
@@ -796,7 +870,7 @@
       chat.scrollTop = chat.scrollHeight;
       const btn = $("#sendBtn"); if (btn) btn.disabled = true;
       try {
-        const sys = "You are StudyBuddy, a patient tutor for an Indian school student" + (S.profile.klass ? " in " + S.profile.klass : "") + ". Explain simply, step by step, with a small example. Use short paragraphs and bullet points. If asked in Hindi or another Indian language, reply in that language.";
+        const sys = "You are StudyBuddy, a patient tutor for an Indian school student" + (S.profile.klass ? " in " + S.profile.klass : "") + ". Explain simply, step by step, with a small example. Use short paragraphs and bullet points. Always write your answer in " + S.settings.lang + ".";
         const ctx = notesContext(q);
         const msgs = [{ role: "system", content: sys + (ctx ? "\n\n" + ctx : "") }];
         S.chat.slice(-9).forEach((m) => msgs.push({ role: m.role === "bot" ? "assistant" : "user", content: m.content }));
@@ -826,6 +900,54 @@
     calcToggleSci: function () { calcSci = !calcSci; go("calc"); },
 
     /* settings */
+    /* flashcards */
+    newCard: function () {
+      let h = '<div class="field"><label>Question</label><input id="cFront" placeholder="e.g. What is photosynthesis?"></div>';
+      h += '<div class="field"><label>Answer</label><textarea id="cBack" style="min-height:80px"></textarea></div>';
+      h += '<div class="field"><label>Subject</label><select id="cSubj">' + subjectOptions() + "</select></div>";
+      h += '<div class="actions"><button class="btn primary" onclick="App.saveCard()">Save</button><button class="btn ghost" onclick="App.closeModal()">Cancel</button></div>';
+      modal("New card", h);
+    },
+    saveCard: function () {
+      const f = $("#cFront").value.trim(), b = $("#cBack").value.trim();
+      if (!f || !b) return toast("Enter a question and an answer.");
+      S.cards.push({ id: uid(), front: f, back: b, subject: $("#cSubj").value, created: Date.now() });
+      save(); closeModal(); go("cards"); toast("Card added.");
+    },
+    delCard: function (id) { S.cards = S.cards.filter((c) => c.id !== id); save(); go(current); },
+    cardsFromNote: async function (id) {
+      const n = S.notes.find((x) => x.id === id); if (!n) return;
+      modal("Making flashcards…", '<div class="empty"><span class="big">🃏</span>Reading “' + escapeHtml(n.title) + "”…</div>");
+      let cards = [];
+      if (S.settings.apiKey && S.settings.provider !== "offline") {
+        try {
+          const txt = await askAI([{ role: "user", content: "Create 10 flashcards from these study notes. Output each as two lines exactly: 'Q: <question>' then 'A: <short answer>'. No numbering and no extra text.\n\n" + n.content.slice(0, 8000) }]);
+          cards = parseAICards(txt);
+        } catch (e) { toast("AI failed — used offline cards."); }
+      }
+      if (!cards.length) cards = offlineCards(n.content);
+      if (!cards.length) { closeModal(); return toast("Couldn't find questions in that note."); }
+      cards.forEach((c) => S.cards.push({ id: uid(), front: c.front, back: c.back, subject: n.subject || "", noteId: n.id, created: Date.now() }));
+      save(); closeModal(); go("cards"); toast(cards.length + " flashcards created.");
+    },
+    studyCards: function () {
+      if (!S.cards.length) return toast("No cards to study.");
+      study = { deck: S.cards.slice().sort(() => Math.random() - 0.5), i: 0, flipped: false, known: new Set() };
+      openStudy();
+    },
+    flip: function () { if (study) { study.flipped = !study.flipped; openStudy(); } },
+    studyNext: function () { if (!study) return; study.i++; study.flipped = false; if (study.i >= study.deck.length) return App.studyDone(); openStudy(); },
+    gotIt: function () { if (!study) return; study.known.add(study.deck[study.i].id); App.studyNext(); },
+    again: function () {
+      if (!study) return;
+      const c = study.deck.splice(study.i, 1)[0];
+      study.deck.push(c); study.flipped = false;
+      if (study.i >= study.deck.length) study.i = 0;
+      openStudy();
+    },
+    studyDone: function () { const k = study ? study.known.size : 0, t = study ? study.deck.length : 0; study = null; closeModal(); toast("Deck done — " + k + "/" + t + " known. Nice!"); },
+    setLang: function (v) { S.settings.lang = v; save(); if (current === "doubts") go("doubts"); toast("Answers in " + v + "."); },
+
     stProvChange: function (v) {
       const m = $("#stModel");
       if (v === "openai") m.value = "gpt-4o-mini";
@@ -840,6 +962,8 @@
       S.settings.apiKey = $("#stKey").value.trim();
       S.settings.model = $("#stModel").value.trim();
       S.settings.useNotesContext = $("#stCtx").checked;
+      S.settings.sound = $("#stSound").checked;
+      S.settings.lang = $("#stLang").value;
       save(); applyTheme(); closeModal(); go(current); toast("Settings saved.");
     },
     exportData: function () {
@@ -881,6 +1005,7 @@
       h += '<button class="item tap" onclick="App.closeModal();App.go(\'syllabus\')"><span style="font-size:20px">📖</span><div class="grow"><div class="t">Syllabus</div></div></button>';
       h += '<button class="item tap" onclick="App.closeModal();App.go(\'progress\')"><span style="font-size:20px">📊</span><div class="grow"><div class="t">Study tracking</div></div></button>';
       h += '<button class="item tap" onclick="App.closeModal();App.go(\'calc\')"><span style="font-size:20px">🧮</span><div class="grow"><div class="t">Calculator</div></div></button>';
+      h += '<button class="item tap" onclick="App.closeModal();App.go(\'cards\')"><span style="font-size:20px">🃏</span><div class="grow"><div class="t">Flashcards</div></div></button>';
       h += '<button class="item tap" onclick="App.settings()"><span style="font-size:20px">⚙️</span><div class="grow"><div class="t">Settings</div></div></button>';
       h += "</div>";
       modal("Menu", h);
