@@ -9,7 +9,7 @@
     tasks: [], events: [], subjects: [], notes: [], sessions: [], chat: [], cards: [],
     settings: {
       theme: "light", work: 25, short: 5, long: 15, rounds: 4,
-      provider: "sarvam", model: "sarvam-105b", apiKey: "", useNotesContext: true, autostartBreak: true,
+      provider: "gemini", model: "gemini-2.5-flash", apiKey: "", useNotesContext: true, autostartBreak: true,
       sound: true, lang: "English"
     }
   };
@@ -74,6 +74,10 @@
   function subjectById(id) { return S.subjects.find((s) => s.id === id); }
   function subjectName(id) { const s = subjectById(id); return s ? s.name : "General"; }
   function subjectColor(id) { const s = subjectById(id); return s ? s.color : "#8a8fb0"; }
+  let deferredPrompt = null;
+  function isIOS() { return /iphone|ipad|ipod/i.test(navigator.userAgent); }
+  function isStandalone() { return (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true; }
+  function canInstall() { return !isStandalone() && (!!deferredPrompt || isIOS()); }
   const LANGS = ["English", "Hindi", "Tamil", "Telugu", "Bengali", "Marathi", "Gujarati", "Kannada", "Malayalam", "Punjabi", "Odia", "Urdu"];
   function langOptions(sel) { return LANGS.map((l) => '<option' + (l === sel ? " selected" : "") + ">" + l + "</option>").join(""); }
 
@@ -140,6 +144,8 @@
     h += qa("cards", "🃏", "Flashcards");
     h += "</div>";
 
+    if (canInstall()) h += installCard();
+
     h += '<div class="section-title"><h2>Today\'s tasks</h2><button class="btn sm ghost" onclick="App.go(\'tasks\')">All</button></div>';
     if (!todaysTasks.length) h += emptyBox("🎉", "Nothing due today. Add a task to get started.");
     else h += '<div class="list">' + todaysTasks.slice(0, 5).map(taskRow).join("") + "</div>";
@@ -169,6 +175,9 @@
   function stat(n, l) { return '<div class="stat"><div class="n">' + n + '</div><div class="l">' + l + "</div></div>"; }
   function qa(v, i, t) { return '<button onclick="App.go(\'' + v + '\')"><span class="i">' + i + "</span>" + t + "</button>"; }
   function emptyBox(i, t) { return '<div class="empty"><span class="big">' + i + "</span>" + t + "</div>"; }
+  function installCard() {
+    return '<div class="card" style="border-left:4px solid var(--primary)"><div class="row" style="justify-content:space-between"><div><b>📲 Add StudyBuddy to your home screen</b><div class="muted small">Open it like a normal app — full screen, with its own icon, and it works offline.</div></div><button class="btn primary sm" onclick="App.install()">Install</button></div></div>';
+  }
   function progressLine(name, pct, color) {
     return '<div style="margin-bottom:11px"><div class="row" style="justify-content:space-between;margin-bottom:5px"><span style="font-weight:650;font-size:13.5px">' + escapeHtml(name) + '</span><span class="muted small">' + pct + '%</span></div><div class="bar"><span style="width:' + pct + "%;background:" + color + '"></span></div></div>';
   }
@@ -536,7 +545,7 @@
     const configured = !!(S.settings.apiKey && S.settings.provider !== "offline");
     let h = '<div class="section-title"><h2>Doubts bot</h2><button class="btn sm ghost" onclick="App.settings()">' + (configured ? "⚙️ " + S.settings.provider : "⚙️ Set up AI") + "</button></div>";
     if (!configured) {
-      h += '<div class="card"><b>Offline mode</b><div class="muted small">I can search your own notes and give study tips. Add a Sarvam or OpenAI API key in Settings to ask any question, get a real tutor answer, and have it reply in your chosen language. Your key stays on this device.</div></div>';
+      h += '<div class="card"><b>Offline mode</b><div class="muted small">I can search your own notes and give study tips. To chat online and get real answers, connect a free AI key (Google Gemini has a free tier). Your key stays on this device.</div><div style="margin-top:10px"><button class="btn primary sm" onclick="App.settings()">Connect AI</button></div></div>';
     }
     h += '<div class="field" style="margin-bottom:12px"><label>Answer language</label><select onchange="App.setLang(this.value)">' + langOptions(S.settings.lang) + '</select></div>';
     h += '<div class="card"><div class="chat" id="chat">';
@@ -551,6 +560,7 @@
   async function askAI(messages) {
     const s = S.settings;
     if (s.provider === "offline" || !s.apiKey) return offlineAnswer(messages);
+    if (s.provider === "gemini") return askGemini(messages, s);
     let url, headers, body, model;
     if (s.provider === "openai") {
       url = "https://api.openai.com/v1/chat/completions";
@@ -571,6 +581,31 @@
     const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
     if (!content) throw new Error("Empty response from the model.");
     return content;
+  }
+  async function askGemini(messages, s) {
+    const sys = messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n");
+    const contents = messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
+    const models = [s.model || "gemini-2.5-flash", "gemini-2.5-flash", "gemini-2.0-flash"].filter((v, i, a) => a.indexOf(v) === i);
+    let lastErr = null;
+    for (let k = 0; k < models.length; k++) {
+      const url = "https://generativelanguage.googleapis.com/v1beta/models/" + models[k] + ":generateContent";
+      const body = { contents: contents };
+      if (sys) body.systemInstruction = { parts: [{ text: sys }] };
+      const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": s.apiKey }, body: JSON.stringify(body) });
+      if (res.ok) {
+        const data = await res.json();
+        const cand = data.candidates && data.candidates[0];
+        const parts = cand && cand.content && cand.content.parts;
+        const text = parts ? parts.map((p) => p.text || "").join("").trim() : "";
+        if (text) return text;
+        lastErr = new Error("Gemini returned an empty answer.");
+        continue;
+      }
+      const txt = await res.text().catch(() => "");
+      if (res.status === 404) { lastErr = new Error("Gemini model not found: " + models[k]); continue; }
+      throw new Error("Gemini error " + res.status + (res.status === 400 || res.status === 403 ? " — check your API key." : "") + (txt ? " · " + txt.slice(0, 160) : ""));
+    }
+    throw lastErr || new Error("Gemini request failed.");
   }
   function notesContext(query) {
     if (!S.settings.useNotesContext || !S.notes.length) return "";
@@ -714,12 +749,14 @@
     h += '<label class="row small" style="gap:8px;margin-bottom:6px"><input type="checkbox" id="stSound" style="width:auto"' + (s.sound ? " checked" : "") + "> Play a sound when the timer finishes</label>";
     h += '<hr style="border:none;border-top:1px solid var(--border);margin:16px 0">';
     h += '<b class="small">Doubts bot</b>';
-    h += '<div class="field" style="margin-top:8px"><label>Provider</label><select id="stProv" onchange="App.stProvChange(this.value)"><option value="sarvam"' + (s.provider === "sarvam" ? " selected" : "") + '>Sarvam AI (recommended)</option><option value="openai"' + (s.provider === "openai" ? " selected" : "") + '>OpenAI</option><option value="offline"' + (s.provider === "offline" ? " selected" : "") + ">Offline (notes only)</option></select></div>";
+    h += '<div class="field" style="margin-top:8px"><label>Provider</label><select id="stProv" onchange="App.stProvChange(this.value)"><option value="gemini"' + (s.provider === "gemini" ? " selected" : "") + '>Google Gemini (free tier)</option><option value="sarvam"' + (s.provider === "sarvam" ? " selected" : "") + '>Sarvam AI</option><option value="openai"' + (s.provider === "openai" ? " selected" : "") + '>OpenAI</option><option value="offline"' + (s.provider === "offline" ? " selected" : "") + ">Offline (notes only)</option></select></div>";
     h += '<div class="field"><label>Answer language</label><select id="stLang">' + langOptions(s.lang) + '</select></div>';
     h += '<div class="field"><label>API key <span class="muted">(stored only on this device)</span></label><input id="stKey" type="password" value="' + escapeHtml(s.apiKey) + '" placeholder="paste your key"></div>';
     h += '<div class="field"><label>Model</label><input id="stModel" value="' + escapeHtml(s.model) + '"></div>';
     h += '<label class="row small" style="gap:8px;margin-bottom:6px"><input type="checkbox" id="stCtx" style="width:auto"' + (s.useNotesContext ? " checked" : "") + "> Let the bot use my notes as context</label>";
-    h += '<div class="muted small" id="stHint">Get a free Sarvam key at dashboard.sarvam.ai. Keys are saved in this browser only and sent straight to the provider.</div>';
+    h += '<div class="muted small" id="stHint">' + (s.provider === "gemini" ? "Get a free key at aistudio.google.com." : s.provider === "openai" ? "Get a key at platform.openai.com." : s.provider === "sarvam" ? "Get a key at dashboard.sarvam.ai." : "No key needed — the bot will only search your notes.") + ' Your key is saved only in this browser and sent straight to the provider.</div>';
+    h += '<div style="margin:10px 0 4px"><button class="btn ghost sm" id="testBtn" onclick="App.testAI()">Test connection</button></div>';
+    h += '<div class="muted small" id="testOut" style="min-height:16px"></div>';
     h += '<div class="actions"><button class="btn primary" onclick="App.saveSettings()">Save</button><button class="btn ghost" onclick="App.closeModal()">Cancel</button></div>';
     h += '<hr style="border:none;border-top:1px solid var(--border);margin:18px 0"><b class="small">Data</b>';
     h += '<div class="actions"><button class="btn ghost" onclick="App.exportData()">Export backup</button><button class="btn ghost" onclick="App.importData()">Import</button><button class="btn danger" onclick="App.resetData()">Reset all</button></div>';
@@ -947,12 +984,46 @@
     },
     studyDone: function () { const k = study ? study.known.size : 0, t = study ? study.deck.length : 0; study = null; closeModal(); toast("Deck done — " + k + "/" + t + " known. Nice!"); },
     setLang: function (v) { S.settings.lang = v; save(); if (current === "doubts") go("doubts"); toast("Answers in " + v + "."); },
+    install: async function () {
+      if (deferredPrompt && typeof deferredPrompt.prompt === "function") {
+        deferredPrompt.prompt();
+        try { await deferredPrompt.userChoice; } catch (e) {}
+        deferredPrompt = null;
+        go(current);
+        return;
+      }
+      if (isIOS()) {
+        modal("Add to Home Screen", '<div class="note-body">On iPhone or iPad:\n\n1. Tap the Share button (the square with an arrow) at the bottom of Safari.\n2. Scroll down and tap Add to Home Screen.\n3. Tap Add.\n\nStudyBuddy then opens full screen, like a normal app.</div><div class="actions"><button class="btn primary" onclick="App.closeModal()">Got it</button></div>');
+      } else {
+        modal("Add to Home Screen", '<div class="note-body">On Android:\n\n1. Open StudyBuddy in Chrome.\n2. Tap the three-dot menu (top right).\n3. Tap Install app (or Add to Home screen).\n\nStudyBuddy then opens full screen, like a normal app.</div><div class="actions"><button class="btn primary" onclick="App.closeModal()">Got it</button></div>');
+      }
+    },
+    testAI: async function () {
+      const key = $("#stKey").value.trim(), prov = $("#stProv").value, model = $("#stModel").value.trim();
+      const out = $("#testOut"), btn = $("#testBtn");
+      if (!key && prov !== "offline") { if (out) out.textContent = "Paste an API key first."; return toast("Paste an API key first."); }
+      if (btn) { btn.disabled = true; btn.textContent = "Testing…"; }
+      const prev = { provider: S.settings.provider, apiKey: S.settings.apiKey, model: S.settings.model };
+      try {
+        S.settings.provider = prov; S.settings.apiKey = key; S.settings.model = model;
+        const reply = await askAI([{ role: "user", content: "Reply with exactly: OK" }]);
+        if (out) out.textContent = "Connected — the bot replied: " + String(reply).slice(0, 90);
+        toast("Connected!");
+      } catch (e) {
+        if (out) out.textContent = "Could not connect: " + (e.message || "unknown error");
+        toast("Could not connect.");
+      } finally {
+        S.settings.provider = prev.provider; S.settings.apiKey = prev.apiKey; S.settings.model = prev.model;
+        if (btn) { btn.disabled = false; btn.textContent = "Test connection"; }
+      }
+    },
 
     stProvChange: function (v) {
       const m = $("#stModel");
       if (v === "openai") m.value = "gpt-4o-mini";
       else if (v === "sarvam") m.value = "sarvam-105b";
-      $("#stHint").textContent = v === "sarvam" ? "Get a key at dashboard.sarvam.ai (api-subscription-key)." : v === "openai" ? "Get a key at platform.openai.com." : "No key needed — the bot will only search your notes.";
+      else if (v === "gemini") m.value = "gemini-2.5-flash";
+      $("#stHint").textContent = v === "sarvam" ? "Get a key at dashboard.sarvam.ai (api-subscription-key)." : v === "openai" ? "Get a key at platform.openai.com." : v === "gemini" ? "Get a free key at aistudio.google.com — Google Gemini has a free tier." : "No key needed — the bot will only search your notes.";
     },
     saveSettings: function () {
       S.profile.name = $("#stName").value.trim();
@@ -1006,10 +1077,13 @@
       h += '<button class="item tap" onclick="App.closeModal();App.go(\'progress\')"><span style="font-size:20px">📊</span><div class="grow"><div class="t">Study tracking</div></div></button>';
       h += '<button class="item tap" onclick="App.closeModal();App.go(\'calc\')"><span style="font-size:20px">🧮</span><div class="grow"><div class="t">Calculator</div></div></button>';
       h += '<button class="item tap" onclick="App.closeModal();App.go(\'cards\')"><span style="font-size:20px">🃏</span><div class="grow"><div class="t">Flashcards</div></div></button>';
+      if (!isStandalone()) h += '<button class="item tap" onclick="App.closeModal();App.install()"><span style="font-size:20px">📲</span><div class="grow"><div class="t">Add to home screen</div></div></button>';
       h += '<button class="item tap" onclick="App.settings()"><span style="font-size:20px">⚙️</span><div class="grow"><div class="t">Settings</div></div></button>';
       h += "</div>";
       modal("Menu", h);
     };
+    window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); deferredPrompt = e; if (current === "home") go("home"); });
+    window.addEventListener("appinstalled", () => { deferredPrompt = null; toast("StudyBuddy was added to your home screen."); });
     $$("#tabbar button").forEach((b) => b.onclick = () => go(b.dataset.view));
     $("#brandDate").textContent = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" });
     const start = (location.hash || "").replace("#", "");
