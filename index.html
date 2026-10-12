@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>StudyBuddy — your study companion</title>
+<meta name="description" content="A study app with calendar, Pomodoro timer, calculator, notes from uploaded chapters, an AI doubts bot, syllabus tracking and daily tasks.">
+<meta name="theme-color" content="#5b5bd6">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="appbar">
+  <div class="brand">
+    <span class="logo">📚</span>
+    <span>StudyBuddy<small id="brandDate">—</small></span>
+  </div>
+  <span class="spacer"></span>
+  <button class="iconbtn" id="themeBtn" title="Toggle theme">🌙</button>
+  <button class="iconbtn" id="moreBtn" title="More">☰</button>
+</header>
+
+<nav class="tabbar" id="tabbar">
+  <button data-view="home"><span class="i">🏠</span>Home</button>
+  <button data-view="focus"><span class="i">⏱️</span>Focus</button>
+  <button data-view="tasks"><span class="i">✅</span>Tasks</button>
+  <button data-view="notes"><span class="i">📝</span>Notes</button>
+  <button data-view="doubts"><span class="i">🤖</span>Doubts</button>
+  <button data-view="calendar" class="desk"><span class="i">📅</span>Calendar</button>
+  <button data-view="syllabus" class="desk"><span class="i">📖</span>Syllabus</button>
+  <button data-view="progress" class="desk"><span class="i">📊</span>Progress</button>
+  <button data-view="calc" class="desk"><span class="i">🧮</span>Calc</button>
+</nav>
+
+<main id="view"></main>
+
+<div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
+<div id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
